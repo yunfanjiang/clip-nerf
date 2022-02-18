@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from tqdm import tqdm, trange
 
 import matplotlib.pyplot as plt
+import clip
 
 from run_nerf_helpers import *
 
@@ -505,6 +506,18 @@ def config_parser():
         "--datadir", type=str, default="./data/llff/fern", help="input data directory"
     )
 
+    # CLIP
+    parser.add_argument(
+        "--clip_model", type=str, default="ViT-B/16", help="CLIP variant to use"
+    )
+    parser.add_argument("--prompt", type=str, help="A natural language description")
+    parser.add_argument(
+        "--clip_resolution",
+        type=int,
+        default=224,
+        help="Input resolution of CLIP img encoder",
+    )
+
     # training options
     parser.add_argument("--netdepth", type=int, default=8, help="layers in network")
     parser.add_argument("--netwidth", type=int, default=256, help="channels per layer")
@@ -843,6 +856,11 @@ def train():
     render_kwargs_train.update(bds_dict)
     render_kwargs_test.update(bds_dict)
 
+    # load CLIP model
+    clip_model, _ = clip.load(args.clip_model, device=device)
+    # define CLIP preprocess
+    preprocess = clip_nerf_transform(args.clip_resolution)
+
     # Move testing data to GPU
     render_poses = torch.Tensor(render_poses).to(device)
 
@@ -914,6 +932,13 @@ def train():
 
     N_iters = 200000 + 1
     print("Begin")
+
+    # prepare language embedding
+    text = clip.tokenize(args.prompt).to(device)
+    with torch.no_grad():
+        text_emb = clip_model.encode_text(text)
+    print(f"Embedding of language description: {text_emb.shape}")
+
     print("TRAIN views are", i_train)
     print("TEST views are", i_test)
     print("VAL views are", i_val)
@@ -997,18 +1022,14 @@ def train():
             **render_kwargs_train,
         )
 
+        # use CLIP img encoder to get img features
+        rgb = preprocess(rgb)
+        img_emb_from_nerf = clip_model.encode_image(rgb.unsqueeze(0))
+
         optimizer.zero_grad()
-        img_loss = img2mse(rgb, target_s)
-        trans = extras["raw"][..., -1]
-        loss = img_loss
-        psnr = mse2psnr(img_loss)
+        clip_loss = -torch.sum(img_emb_from_nerf * text_emb, dim=1).mean()
 
-        if "rgb0" in extras:
-            img_loss0 = img2mse(extras["rgb0"], target_s)
-            loss = loss + img_loss0
-            psnr0 = mse2psnr(img_loss0)
-
-        loss.backward()
+        clip_loss.backward()
         optimizer.step()
 
         # NOTE: IMPORTANT!

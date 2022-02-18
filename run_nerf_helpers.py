@@ -4,6 +4,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from torchvision.transforms import (
+    Compose,
+    Resize,
+    CenterCrop,
+    Normalize,
+    InterpolationMode,
+)
 
 
 # Misc
@@ -293,3 +300,24 @@ def sample_pdf(bins, weights, N_samples, det=False, pytest=False):
     samples = bins_g[..., 0] + t * (bins_g[..., 1] - bins_g[..., 0])
 
     return samples
+
+
+def _vec_to_img(vec: torch.Tensor):
+    assert vec.ndim == 2
+    assert vec.shape[1] == 3
+    side_len = int(np.sqrt(vec.shape[0]).item())
+    return vec.reshape((side_len, side_len, 3)).permute((2, 0, 1))
+
+
+def clip_nerf_transform(n_px):
+    return Compose(
+        [
+            _vec_to_img,
+            Resize(n_px, interpolation=InterpolationMode.BICUBIC),
+            CenterCrop(n_px),
+            Normalize(
+                (0.48145466, 0.4578275, 0.40821073),
+                (0.26862954, 0.26130258, 0.27577711),
+            ),
+        ]
+    )
