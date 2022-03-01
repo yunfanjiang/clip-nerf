@@ -1033,7 +1033,7 @@ def train():
         optimizer.step()
 
         # NOTE: IMPORTANT!
-        ###   update learning rate   ###
+        # ------ update learning rate ------
         decay_rate = 0.1
         decay_steps = args.lrate_decay * 1000
         new_lrate = args.lrate * (decay_rate ** (global_step / decay_steps))
@@ -1042,8 +1042,8 @@ def train():
         ################################
 
         dt = time.time() - time0
-        # print(f"Step: {global_step}, Loss: {loss}, Time: {dt}")
-        #####           end            #####
+        # print(f"Step: {global_step}, Loss: {clip_loss}, Time: {dt}")
+        # ------ end ------
 
         # Rest is logging
         if i % args.i_weights == 0:
@@ -1102,7 +1102,7 @@ def train():
             print("Saved test set")
 
         if i % args.i_print == 0:
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {loss.item()}  PSNR: {psnr.item()}")
+            tqdm.write(f"[TRAIN] Iter: {i} Loss: {clip_loss.item()}")
         """
             print(expname, i, psnr.numpy(), loss.numpy(), global_step.numpy())
             print('iter time {:.05f}'.format(dt))
