@@ -1074,6 +1074,7 @@ def train():
                 writer.add_scalar("eval/target_score", target_score.item(), global_step)
                 writer.add_scalar("eval/output_score", rgbs_score.item(), global_step)
             if rgbs_score.item() > best_eval_score:
+                best_eval_score = rgbs_score.item()
                 best_model_step = global_step
                 # save model
                 path = os.path.join(
