@@ -719,7 +719,7 @@ def config_parser():
         help="frequency of render_poses video saving",
     )
     parser.add_argument(
-        "--eval_interval", type=int, default=2,
+        "--eval_interval", type=int, default=10000,
     )
     parser.add_argument(
         "--save_best", action="store_false",
@@ -934,13 +934,13 @@ def train():
 
     best_eval_score = -float("inf")
     best_model_step = 0
-    eval_clip, _ = clip.load(args.eval_clip_model, device=device)
+    eval_clip, _ = clip.load(args.eval_clip_model, device="cpu")
     eval_preprocess = eval_clip_transform(args.clip_resolution)
 
     # prepare language embedding
-    text = clip.tokenize(args.prompt).to(device)
+    text = clip.tokenize(args.prompt)
     with torch.no_grad():
-        text_emb = clip_model.encode_text(text)
+        text_emb = clip_model.encode_text(text.to(device))
         eval_text_emb = eval_clip.encode_text(text)
     print(f"Embedding of language description: {text_emb.shape}")
 
@@ -1063,8 +1063,8 @@ def train():
                     savedir=dev_savedir,
                     render_factor=args.render_factor,
                 )
-            target = torch.from_numpy(target).to(device)
-            rgbs = torch.from_numpy(rgbs).to(device)
+            target = torch.from_numpy(target)
+            rgbs = torch.from_numpy(rgbs)
 
             with torch.no_grad():
                 target_embs = eval_clip.encode_image(eval_preprocess(target))
