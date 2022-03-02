@@ -177,23 +177,12 @@ def render_path(
     rgbs = []
     disps = []
 
-    t = time.time()
     for i, c2w in enumerate(tqdm(render_poses)):
-        print(i, time.time() - t)
-        t = time.time()
         rgb, disp, acc, _ = render(
             H, W, K, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs
         )
         rgbs.append(rgb.cpu().numpy())
         disps.append(disp.cpu().numpy())
-        if i == 0:
-            print(rgb.shape, disp.shape)
-
-        """
-        if gt_imgs is not None and render_factor==0:
-            p = -10. * np.log10(np.mean(np.square(rgb.cpu().numpy() - gt_imgs[i])))
-            print(p)
-        """
 
         if savedir is not None:
             rgb8 = to8b(rgbs[-1])
@@ -511,6 +500,9 @@ def config_parser():
     parser.add_argument(
         "--clip_model", type=str, default="ViT-B/16", help="CLIP variant to use"
     )
+    parser.add_argument(
+        "--eval_clip_model", type=str, default="ViT-B/32", help="CLIP variant for eval"
+    )
     parser.add_argument("--prompt", type=str, help="A natural language description")
     parser.add_argument(
         "--clip_resolution",
@@ -726,6 +718,12 @@ def config_parser():
         default=50000,
         help="frequency of render_poses video saving",
     )
+    parser.add_argument(
+        "--eval_interval", type=int, default=2,
+    )
+    parser.add_argument(
+        "--save_best", action="store_false",
+    )
 
     return parser
 
@@ -934,10 +932,16 @@ def train():
     N_iters = 200000 + 1
     print("Begin")
 
+    best_eval_score = -float("inf")
+    best_model_step = 0
+    eval_clip, _ = clip.load(args.eval_clip_model, device=device)
+    eval_preprocess = eval_clip_transform(args.clip_resolution)
+
     # prepare language embedding
     text = clip.tokenize(args.prompt).to(device)
     with torch.no_grad():
         text_emb = clip_model.encode_text(text)
+        eval_text_emb = eval_clip.encode_text(text)
     print(f"Embedding of language description: {text_emb.shape}")
 
     print("TRAIN views are", i_train)
@@ -1043,57 +1047,66 @@ def train():
         writer.add_scalar("loss/train", clip_loss.item(), global_step)
         # ------ end ------
 
-        # Rest is logging
-        if i % args.i_weights == 0:
-            path = os.path.join(basedir, expname, "{:06d}.tar".format(i))
-            torch.save(
-                {
-                    "global_step": global_step,
-                    "network_fn_state_dict": render_kwargs_train[
-                        "network_fn"
-                    ].state_dict(),
-                    "network_fine_state_dict": render_kwargs_train[
-                        "network_fine"
-                    ].state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                },
-                path,
-            )
-            print("Saved checkpoints at", path)
+        # eval
+        if i % args.eval_interval == 0:
+            dev_savedir = os.path.join(basedir, expname, "dev_set_{:06d}".format(i))
+            os.makedirs(dev_savedir, exist_ok=True)
 
-        if i % args.i_video == 0 and i > 0:
-            # Turn on testing mode
+            target = images[i_val]
             with torch.no_grad():
                 rgbs, disps = render_path(
-                    render_poses, hwf, K, args.chunk, render_kwargs_test
-                )
-            print("Done, saving", rgbs.shape, disps.shape)
-            moviebase = os.path.join(
-                basedir, expname, "{}_spiral_{:06d}_".format(expname, i)
-            )
-            imageio.mimwrite(moviebase + "rgb.mp4", to8b(rgbs), fps=30, quality=8)
-            imageio.mimwrite(
-                moviebase + "disp.mp4", to8b(disps / np.max(disps)), fps=30, quality=8
-            )
-
-        if i % args.i_testset == 0 and i > 0:
-            testsavedir = os.path.join(basedir, expname, "testset_{:06d}".format(i))
-            os.makedirs(testsavedir, exist_ok=True)
-            print("test poses shape", poses[i_test].shape)
-            with torch.no_grad():
-                render_path(
-                    torch.Tensor(poses[i_test]).to(device),
+                    torch.Tensor(poses[i_val]).to(device),
                     hwf,
                     K,
                     args.chunk,
                     render_kwargs_test,
-                    gt_imgs=images[i_test],
-                    savedir=testsavedir,
+                    savedir=dev_savedir,
+                    render_factor=args.render_factor,
                 )
-            print("Saved test set")
+            target = torch.from_numpy(target).to(device)
+            rgbs = torch.from_numpy(rgbs).to(device)
 
-        if i % args.i_print == 0:
-            tqdm.write(f"[TRAIN] Iter: {i} Loss: {clip_loss.item()}")
+            with torch.no_grad():
+                target_embs = eval_clip.encode_image(eval_preprocess(target))
+                rgbs_embs = eval_clip.encode_image(eval_preprocess(rgbs))
+                target_score = torch.sum(target_embs * eval_text_emb, dim=1).mean()
+                rgbs_score = torch.sum(rgbs_embs * eval_text_emb, dim=1).mean()
+                writer.add_scalar("eval/target_score", target_score.item(), global_step)
+                writer.add_scalar("eval/output_score", rgbs_score.item(), global_step)
+            if rgbs_score.item() > best_eval_score:
+                best_model_step = global_step
+                # save model
+                path = os.path.join(
+                    basedir, expname, "best_model", "{:06d}.tar".format(best_model_step)
+                )
+                torch.save(
+                    {
+                        "global_step": best_model_step,
+                        "network_fn_state_dict": render_kwargs_train[
+                            "network_fn"
+                        ].state_dict(),
+                        "network_fine_state_dict": render_kwargs_train[
+                            "network_fine"
+                        ].state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                    },
+                    path,
+                )
+                print("Saved checkpoints at", path)
+                # save video
+                rgbs = rgbs.detach().cpu().numpy()
+                moviebase = os.path.join(
+                    basedir,
+                    expname,
+                    "{}_spiral_{:06d}_".format(expname, best_model_step),
+                )
+                imageio.mimwrite(moviebase + "rgb.mp4", to8b(rgbs), fps=30, quality=8)
+                imageio.mimwrite(
+                    moviebase + "disp.mp4",
+                    to8b(disps / np.max(disps)),
+                    fps=30,
+                    quality=8,
+                )
 
         global_step += 1
 

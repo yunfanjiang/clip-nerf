@@ -321,3 +321,16 @@ def clip_nerf_transform(n_px):
             ),
         ]
     )
+
+
+def eval_clip_transform(n_px):
+    return Compose(
+        [
+            Resize(n_px, interpolation=InterpolationMode.BICUBIC),
+            CenterCrop(n_px),
+            Normalize(
+                (0.48145466, 0.4578275, 0.40821073),
+                (0.26862954, 0.26130258, 0.27577711),
+            ),
+        ]
+    )
