@@ -938,10 +938,10 @@ def train():
     eval_preprocess = eval_clip_transform(args.clip_resolution)
 
     # prepare language embedding
-    text = clip.tokenize(args.prompt)
+    text = clip.tokenize(args.prompt).to(device)
     with torch.no_grad():
-        text_emb = clip_model.encode_text(text.to(device))
-        eval_text_emb = eval_clip.encode_text(text)
+        text_emb = clip_model.encode_text(text)
+        eval_text_emb = eval_clip.encode_text(text.cpu())
     print(f"Embedding of language description: {text_emb.shape}")
 
     print("TRAIN views are", i_train)
