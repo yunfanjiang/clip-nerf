@@ -181,16 +181,16 @@ def render_path(
         rgb, disp, acc, _ = render(
             H, W, K, chunk=chunk, c2w=c2w[:3, :4], **render_kwargs
         )
-        rgbs.append(rgb.cpu().numpy())
-        disps.append(disp.cpu().numpy())
+        rgbs.append(rgb)
+        disps.append(disp)
 
         if savedir is not None:
-            rgb8 = to8b(rgbs[-1])
+            rgb8 = to8b(rgbs[-1].detach().cpu().numpy())
             filename = os.path.join(savedir, "{:03d}.png".format(i))
             imageio.imwrite(filename, rgb8)
 
-    rgbs = np.stack(rgbs, 0)
-    disps = np.stack(disps, 0)
+    rgbs = torch.stack(rgbs, 0)
+    disps = torch.stack(disps, 0)
 
     return rgbs, disps
 
@@ -933,7 +933,6 @@ def train():
     print("Begin")
 
     best_eval_score = -float("inf")
-    eval_preprocess = eval_clip_transform(args.clip_resolution)
 
     # prepare language embedding
     text = clip.tokenize(args.prompt).to(device)
@@ -950,81 +949,20 @@ def train():
 
     start = start + 1
     for i in trange(start, N_iters):
-        # Sample random ray batch
-        if use_batching:
-            # Random over all images
-            batch = rays_rgb[i_batch : i_batch + N_rand]  # [B, 2+1, 3*?]
-            batch = torch.transpose(batch, 0, 1)
-            batch_rays, target_s = batch[:2], batch[2]
-
-            i_batch += N_rand
-            if i_batch >= rays_rgb.shape[0]:
-                print("Shuffle data after an epoch!")
-                rand_idx = torch.randperm(rays_rgb.shape[0])
-                rays_rgb = rays_rgb[rand_idx]
-                i_batch = 0
-
-        else:
-            # Random from one image
-            img_i = np.random.choice(i_train)
-            target = images[img_i]
-            target = torch.Tensor(target).to(device)
-            pose = poses[img_i, :3, :4]
-
-            if N_rand is not None:
-                rays_o, rays_d = get_rays(
-                    H, W, K, torch.Tensor(pose)
-                )  # (H, W, 3), (H, W, 3)
-
-                if i < args.precrop_iters:
-                    dH = int(H // 2 * args.precrop_frac)
-                    dW = int(W // 2 * args.precrop_frac)
-                    coords = torch.stack(
-                        torch.meshgrid(
-                            torch.linspace(H // 2 - dH, H // 2 + dH - 1, 2 * dH),
-                            torch.linspace(W // 2 - dW, W // 2 + dW - 1, 2 * dW),
-                        ),
-                        -1,
-                    )
-                    if i == start:
-                        print(
-                            f"[Config] Center cropping of size {2*dH} x {2*dW} is enabled until iter {args.precrop_iters}"
-                        )
-                else:
-                    coords = torch.stack(
-                        torch.meshgrid(
-                            torch.linspace(0, H - 1, H), torch.linspace(0, W - 1, W)
-                        ),
-                        -1,
-                    )  # (H, W, 2)
-
-                coords = torch.reshape(coords, [-1, 2])  # (H * W, 2)
-                select_inds = np.random.choice(
-                    coords.shape[0], size=[N_rand], replace=False
-                )  # (N_rand,)
-                select_coords = coords[select_inds].long()  # (N_rand, 2)
-                rays_o = rays_o[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                rays_d = rays_d[select_coords[:, 0], select_coords[:, 1]]  # (N_rand, 3)
-                batch_rays = torch.stack([rays_o, rays_d], 0)
-                target_s = target[
-                    select_coords[:, 0], select_coords[:, 1]
-                ]  # (N_rand, 3)
-
-        #####  Core optimization loop  #####
-        rgb, disp, acc, extras = render(
-            H,
-            W,
+        img_i = np.random.choice(i_train)
+        rgbs, disps = render_path(
+            torch.Tensor(poses[img_i : img_i + 1]).to(device),
+            hwf,
             K,
-            chunk=args.chunk,
-            rays=batch_rays,
-            verbose=i < 10,
-            retraw=True,
-            **render_kwargs_train,
+            args.chunk,
+            render_kwargs_train,
+            render_factor=args.render_factor,
         )
 
+        # ------  Core optimization loop  ------
         # use CLIP img encoder to get img features
-        rgb = preprocess(rgb)
-        img_emb_from_nerf = clip_model.encode_image(rgb.unsqueeze(0))
+        rgbs = preprocess(rgbs)
+        img_emb_from_nerf = clip_model.encode_image(rgbs)
 
         optimizer.zero_grad()
         clip_loss = -torch.sum(img_emb_from_nerf * text_emb, dim=1).mean()
@@ -1051,7 +989,7 @@ def train():
 
             target = images[i_val]
             with torch.no_grad():
-                rgbs, disps = render_path(
+                rgbs, _ = render_path(
                     torch.Tensor(poses[i_val]).to(device),
                     hwf,
                     K,
@@ -1060,12 +998,11 @@ def train():
                     savedir=dev_savedir,
                     render_factor=args.render_factor,
                 )
-            target = torch.from_numpy(target)
-            rgbs = torch.from_numpy(rgbs)
+            target = torch.from_numpy(target).to(device)
 
             with torch.no_grad():
-                target_embs = clip_model.encode_image(eval_preprocess(target))
-                rgbs_embs = clip_model.encode_image(eval_preprocess(rgbs))
+                target_embs = clip_model.encode_image(preprocess(target))
+                rgbs_embs = clip_model.encode_image(preprocess(rgbs))
                 target_score = torch.sum(target_embs * text_emb, dim=1).mean()
                 rgbs_score = torch.sum(rgbs_embs * text_emb, dim=1).mean()
                 writer.add_scalar("eval/target_score", target_score.item(), global_step)
@@ -1100,12 +1037,6 @@ def train():
                     "{}_spiral_{:06d}_".format(expname, best_model_step),
                 )
                 imageio.mimwrite(moviebase + "rgb.mp4", to8b(rgbs), fps=30, quality=8)
-                imageio.mimwrite(
-                    moviebase + "disp.mp4",
-                    to8b(disps / np.max(disps)),
-                    fps=30,
-                    quality=8,
-                )
 
         global_step += 1
 
