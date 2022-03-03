@@ -309,6 +309,12 @@ def _vec_to_img(vec: torch.Tensor):
     return vec.reshape((side_len, side_len, 3)).permute((2, 0, 1))
 
 
+def _hwc_to_chw(img: torch.Tensor):
+    assert img.ndim == 4
+    assert img.shape[3] == 3
+    return torch.permute(img, (0, 3, 1, 2))
+
+
 def clip_nerf_transform(n_px):
     return Compose(
         [
@@ -326,6 +332,7 @@ def clip_nerf_transform(n_px):
 def eval_clip_transform(n_px):
     return Compose(
         [
+            _hwc_to_chw,
             Resize(n_px, interpolation=InterpolationMode.BICUBIC),
             CenterCrop(n_px),
             Normalize(

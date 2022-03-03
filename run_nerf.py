@@ -933,15 +933,12 @@ def train():
     print("Begin")
 
     best_eval_score = -float("inf")
-    best_model_step = 0
-    eval_clip, _ = clip.load(args.eval_clip_model, device="cpu")
     eval_preprocess = eval_clip_transform(args.clip_resolution)
 
     # prepare language embedding
     text = clip.tokenize(args.prompt).to(device)
     with torch.no_grad():
         text_emb = clip_model.encode_text(text)
-        eval_text_emb = eval_clip.encode_text(text.cpu())
     print(f"Embedding of language description: {text_emb.shape}")
 
     print("TRAIN views are", i_train)
@@ -1067,16 +1064,17 @@ def train():
             rgbs = torch.from_numpy(rgbs)
 
             with torch.no_grad():
-                target_embs = eval_clip.encode_image(eval_preprocess(target))
-                rgbs_embs = eval_clip.encode_image(eval_preprocess(rgbs))
-                target_score = torch.sum(target_embs * eval_text_emb, dim=1).mean()
-                rgbs_score = torch.sum(rgbs_embs * eval_text_emb, dim=1).mean()
+                target_embs = clip_model.encode_image(eval_preprocess(target))
+                rgbs_embs = clip_model.encode_image(eval_preprocess(rgbs))
+                target_score = torch.sum(target_embs * text_emb, dim=1).mean()
+                rgbs_score = torch.sum(rgbs_embs * text_emb, dim=1).mean()
                 writer.add_scalar("eval/target_score", target_score.item(), global_step)
                 writer.add_scalar("eval/output_score", rgbs_score.item(), global_step)
             if rgbs_score.item() > best_eval_score:
                 best_eval_score = rgbs_score.item()
                 best_model_step = global_step
                 # save model
+                os.makedirs(os.path.join(basedir, expname, "best_model"), exist_ok=True)
                 path = os.path.join(
                     basedir, expname, "best_model", "{:06d}.tar".format(best_model_step)
                 )
