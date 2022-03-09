@@ -1,0 +1,15 @@
+defaults:
+  - _self_  # all below configs will override this conf.yaml
+  - target: lego
+
+eval:
+  clip_model: "ViT-B/32"
+  generated_img_folder: ???
+  generated_img_file_template: ???
+  generated_img_start: ???
+  generated_img_end: ???
+  ground_truth_folder: ???
+  ground_truth_file_template: ???
+  ground_truth_start: ???
+  ground_truth_end: ???
+  text_prompt: ???

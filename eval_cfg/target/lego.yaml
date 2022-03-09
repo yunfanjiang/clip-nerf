@@ -1,0 +1,12 @@
+# @package _global_
+
+eval:
+  generated_img_folder: "/Users/yunfanj/workspace/clip-nerf/generated/lego"
+  generated_img_file_template: "lego{}.jpg"
+  generated_img_start: 0
+  generated_img_end: 47
+  ground_truth_folder: "/Users/yunfanj/workspace/clip-nerf/data/nerf_synthetic/lego/train"
+  ground_truth_file_template: "r_{}.png"
+  ground_truth_start: 0
+  ground_truth_end: 47
+  text_prompt: a 3d render of a yellow lego excavator
