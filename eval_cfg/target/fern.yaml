@@ -1,0 +1,12 @@
+# @package _global_
+
+eval:
+  generated_img_folder: "/Users/yunfanj/workspace/clip-nerf/generated/fern"
+  generated_img_file_template: "fern{}.jpg"
+  generated_img_start: 0
+  generated_img_end: 47
+  ground_truth_folder: "/Users/yunfanj/workspace/clip-nerf/data/nerf_llff_data/fern/images"
+  ground_truth_file_template: "IMG_{}.JPG"
+  ground_truth_start: 4026
+  ground_truth_end: 4045
+  text_prompt: a 3d render of a green fern

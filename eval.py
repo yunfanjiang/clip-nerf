@@ -63,7 +63,7 @@ def run_eval(
             generated_embds.append(model.encode_image(img))
     generated_embds = torch.concat(generated_embds, dim=0)
 
-    assert ground_truth_embds.shape == generated_embds.shape
+    assert ground_truth_embds.shape[1] == generated_embds.shape[1]
 
     # text embedding
     text = clip.tokenize([text_prompt]).to(device)
