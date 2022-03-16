@@ -3,6 +3,7 @@ import os
 import hydra
 import torch
 import clip
+import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
@@ -75,15 +76,15 @@ def run_eval(
 
     # score ground truth
     with torch.no_grad():
-        gt_score = cos_sim(ground_truth_embds, text_embd).mean()
+        gt_score = cos_sim(ground_truth_embds, text_embd)
     gt_score = gt_score.cpu().numpy()
 
     # score generated
     with torch.no_grad():
-        generated_score = cos_sim(generated_embds, text_embd).mean()
+        generated_score = cos_sim(generated_embds, text_embd)
     generated_score = generated_score.cpu().numpy()
 
-    print(f"\n Ground-truth score: {gt_score}\n Generated score: {generated_score}")
+    print(f"\n Ground-truth score mean: {np.mean(gt_score)}, std: {np.std(gt_score)}\n Generated score mean: {np.mean(generated_score)}, std: {np.std(generated_score)}")
 
 
 @hydra.main(config_path="./eval_cfg", config_name="conf")
