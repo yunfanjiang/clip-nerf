@@ -19,6 +19,9 @@ def run_eval(
     ground_truth_end: int,
     text_prompt: str,
 ):
+    # metric
+    cos_sim = torch.nn.CosineSimilarity()
+
     generated_img_files = [
         generated_img_file_template.format(i)
         for i in range(generated_img_start, generated_img_end + 1)
@@ -72,12 +75,12 @@ def run_eval(
 
     # score ground truth
     with torch.no_grad():
-        gt_score = (ground_truth_embds * text_embd).sum(dim=1).mean(dim=0)
+        gt_score = cos_sim(ground_truth_embds, text_embd).mean()
     gt_score = gt_score.cpu().numpy()
 
     # score generated
     with torch.no_grad():
-        generated_score = (generated_embds * text_embd).sum(dim=1).mean(dim=0)
+        generated_score = cos_sim(generated_embds, text_embd).mean()
     generated_score = generated_score.cpu().numpy()
 
     print(f"\n Ground-truth score: {gt_score}\n Generated score: {generated_score}")
